@@ -85,5 +85,5 @@ date = new Date(0, 2, 15);
 assert(date.getFullYear() === 1900);
 date = new Date(99, 2, 15);
 assert(date.getFullYear() === 1999);
-date = new Date(100, 2, 15);
-assert(date.getFullYear() === 100)
+date = new Date(1910, 2, 15); //this 100 is invalid in lua's date
+assert(date.getFullYear() === 1910,'expect 100, actual='+date.getFullYear())

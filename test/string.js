@@ -65,10 +65,12 @@ assert(String.fromCharCode(65, "66", 67) === "ABC");
 var n = String("foo");
 var m = new String("bar");
 var o = "abwabwa";
+var p = "\xff\xd8";
 
 assert(n == "foo");
 assert(m == "bar");
 assert(o == "abwabwa");
+assert(p.charCodeAt(0) === 0xff && p.charCodeAt(1)===0xd8);
 assert(n === "foo");
 assert(!(m === "bar"));
 assert(o === "abwabwa");

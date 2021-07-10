@@ -23,7 +23,7 @@ assert(JSON.stringify(undefined) === undefined);
 
 // parse
 var ret = JSON.parse('{"a": [11, "z"]}');
-assert(ret.a[0] === 11);
+assert(ret.a[0] === 11,"actual:#1"+ret.a[1]);
 assert(ret.a[1] === "z");
 assert(ret.a.length === 2);
 assert(ret instanceof Object);

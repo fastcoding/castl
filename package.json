@@ -18,7 +18,7 @@
   },
   "main": "castl.js",
   "scripts": {
-    "test": "node runTests.js"
+    "test": "node runTests.js --jit"
   },
   "bin": {
     "castl": "./bin/castl.js"
@@ -31,7 +31,8 @@
     "babel-preset-es2017": "6.22.0",
     "commander": "2.9.0",
     "esmangle": "1.0.1",
-    "esprima": "2.7.2"
+    "esprima": "2.7.2",
+    "lodash": "^4.17.21"
   },
   "engines": {
     "node": ">=0.12.0"

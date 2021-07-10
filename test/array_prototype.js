@@ -255,6 +255,7 @@ assert(arr12[3] === 8);
 
 arr12 = [10, -6, -11, 2];
 ret = arr12.sort(function (a, b) {
+	console.log('print comp1')
     return a - b
 });
 assert(ret === arr12);
@@ -272,7 +273,7 @@ assert(arr12[3] === 10);
 
 arr12 = [10, -6, -11, 2];
 ret = arr12.sort(function (a, b) {
-    return a > b
+    return a > b ?1:(a<b?-1:0)
 });
 assert(ret === arr12);
 assert(ret == arr12);
@@ -289,13 +290,13 @@ assert(arr12[3] === 10);
 
 arr12 = [10, -6, -11, 2];
 ret = arr12.sort(function (a, b) {
-    return a < b
+    return a < b?1:(a>b?-1:0)
 });
 assert(ret === arr12);
 assert(ret == arr12);
 assert(arr12.length === 4);
 assert(ret.length === 4);
-assert(ret[0] === 10);
+assert(ret[0] === 10,'ret array:'+ret.join(','));
 assert(ret[1] === 2);
 assert(ret[2] === -6);
 assert(ret[3] === -11);

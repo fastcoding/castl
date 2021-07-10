@@ -176,10 +176,27 @@
             this.functions.push([]);
             this.args.push(false);
         },
-
+        
+        loVarsName: function(){
+            return '_local'+(this.functions.length+1)
+        },
+        loVarName: function(id){
+            return '_local'+this.functions.length+'.'+id
+        },
+        findLoVar: function(id){
+            for(var i=this.locals.length-1;i>=0;i--){
+                var idx=this.locals[i].indexOf(id);
+                if (idx>=0){
+                    return '_local'+i+'.'+id;
+                }     
+            }   
+            return id
+        },
         pushLocal: function (varName) {
             // @number
             if (this.locals.length > 0) {
+                //varName=varName.replace(/^[^\.]*\./g,'');
+                //console.log('add local '+varName)
                 this.locals[this.locals.length - 1].push(varName);
             } else {
                 throw new Error("LocalVarManager error: no current local context");
@@ -638,9 +655,9 @@
         compiledForInStatement.push(", true);\n");
 
         if (statement.left.type === "VariableDeclaration") {
-            compiledLeft = compilePattern(statement.left.declarations[0].id);
-            // Add to current local context
-            localVarManager.pushLocal(compiledLeft);
+            compiledLeft = compilePattern(statement.left.declarations[0].id,true);
+            // Add to current local context, but var in for is already lexically local
+            //localVarManager.pushLocal(compiledLeft);
         } else {
             compiledLeft = compileExpression(statement.left);
         }
@@ -990,7 +1007,7 @@
 
         if (statement.argument !== null) {
             // @string
-            return "do return " + compileExpression(statement.argument) + "; end";
+            return "do return " + compileExpression(statement.argument,{}) + "; end";
         }
 
         return "do return end";
@@ -1034,7 +1051,7 @@
         case "AssignmentExpression":
             return compileAssignmentExpression(expression, meta);
         case "FunctionExpression":
-            return compileFunction(expression, meta);
+            return compileFunction(expression, meta||true);
         case "Identifier":
             return compileIdentifier(expression, meta);
         case "Literal":
@@ -1539,7 +1556,7 @@
 
     function compileCallExpression(expression, meta) {
         var compiledCallExpression = [];
-        var compiledCallee = compileExpression(expression.callee);
+        var compiledCallee = compileExpression(expression.callee,{});
         var compiledArguments = compileCallArguments(expression.arguments);
 
         // If callee is method of an object
@@ -2226,12 +2243,13 @@
 
     function compileMemberExpression(expression, meta) {
         var compiledMemberExpression = [];
-        var compiledObject = compileExpression(expression.object);
+        var compiledObject = compileExpression(expression.object,{});
 
         if (expression.object.type === "Literal") {
             // @string
             compiledObject = "(" + compiledObject + ")";
         }
+
         compiledMemberExpression.push(compiledObject);
 
         if (expression.computed) {
@@ -2315,14 +2333,12 @@
 
     function compileFunctionDeclaration(declaration) {
         var compiledFunctionDeclaration = [];
-        var compiledId = compileIdentifier(declaration.id);
-
-        compiledFunctionDeclaration.push(compiledId);
-        compiledFunctionDeclaration.push(" = ");
+        var compiledId = compileIdentifier(declaration.id,true);
+        //localVarManager.pushLocal(compiledId);
+        compiledFunctionDeclaration.push(compiledId); //lovar: replace compiledId with stack_var.id
+        compiledFunctionDeclaration.push(" =(");
         compiledFunctionDeclaration.push(compileFunction(declaration));
-        compiledFunctionDeclaration.push(";");
-
-        localVarManager.pushLocal(compiledId);
+        compiledFunctionDeclaration.push(");");
         localVarManager.pushFunction(compiledFunctionDeclaration.join(""));
     }
 
@@ -2341,11 +2357,13 @@
             // @number
             for (i = 0; i < declarations.length; ++i) {
                 declarator = declarations[i];
-                pattern = compilePattern(declarator.id);
+                //lovar:
+                pattern = compilePattern(declarator.id,true);
 
                 // Add to current local context
+                //if (!declarator.init){
                 localVarManager.pushLocal(pattern);
-
+                //}
                 if (declarator.init !== null) {
                     expression = compileExpression(declarator.init);
                     compiledDeclarationInit = [];
@@ -2357,7 +2375,6 @@
                     compiledDeclarations.push(compiledDeclarationInit.join(''));
                 }
             }
-
             break;
         case "let":
             // TODO
@@ -2391,9 +2408,9 @@
      *
      * ******************/
 
-    function compileFunction(fun) {
-
-        var compiledFunction = ["(function ("];
+    function compileFunction(fun,meta) {
+	    var hasName=meta && fun.id && fun.id.name.length>0 
+        var compiledFunction =[hasName?'(function() local '+fun.id.name+';'+fun.id.name+'=_wrap_fun(function(':"_wrap_fun(function("];
         var compiledBody = "";
 
         // New context
@@ -2455,7 +2472,6 @@
             for (i = 0; i < functions.length; ++i) {
                 compiledFunctionsDeclaration.push(functions[i]);
             }
-
             compiledFunction.push(compiledFunctionsDeclaration.join("\n"));
         }
 
@@ -2463,7 +2479,9 @@
         compiledFunction.push(compiledBody);
         compiledFunction.push("\n");
         compiledFunction.push("end)");
-
+        if (hasName){
+            compiledFunction.push(' return '+fun.id.name+';end)()');
+        }
         return compiledFunction.join('');
     }
 
@@ -2481,12 +2499,13 @@
         }
 
         // @number
-        if (namesSequence.length > 0) {
-            var compiledLocalsDeclaration = ["local "];
+        if (namesSequence.length > 0) { //if length>200, it results in lua runtime error
+            var compiledLocalsDeclaration = ["local " ];//+localVarManager.loVarsName()+" = {} "]; 
             compiledLocalsDeclaration.push(namesSequence.join(","));
             compiledLocalsDeclaration.push(";\n");
 
             return compiledLocalsDeclaration.join("");
+	   
         }
         return "";
     }
@@ -2515,13 +2534,31 @@
     }
 
     function compileIdentifier(identifier, meta) {
+        var iname=identifier.name
         if (identifier.name === "arguments") {
             localVarManager.useArguments();
         }
 
         setMeta(identifier, meta);
+        console.log('identifier:',identifier.name,meta)
+        return sanitizeIdentifier(iname)
 
-        return sanitizeIdentifier(identifier.name);
+        /*
+        let siname=
+        if (identifier.name === "arguments") {
+            return siname;
+        }
+        if (meta===true){
+            //lhs            
+            return localVarManager.loVarName(siname);
+        }
+        if (meta){
+            return siname;
+        }
+        
+        let ret=localVarManager.findLoVar(siname);
+        console.log('looking for '+siname+' => '+ret);
+        return ret;*/
     }
 
     // http://en.wikipedia.org/wiki/UTF-8#Description
@@ -2564,7 +2601,8 @@
     function sanitizeLiteralString(str) {
         return str.replace(/\\/g, '\\\\') // escape backslash
             .replace(/"/g, '\\"') // escape double quotes
-            .replace(/\u00A0/g, " ") // no-break space replaced by regular space
+	    .replace(/[\x7f-\xff\x00-\x1f]/g,function(c){ return '\\'+c.charCodeAt(0) ;})
+            /*.replace(/\u00A0/g, " ") // no-break space replaced by regular space
             .replace(/[\0-\u001f\u007F-\uD7FF\uDC00-\uFFFF]|[\uD800-\uDBFF][\uDC00-\uDFFF]|[\uD800-\uDBFF]/g, // unicode handling
                 function (str) {
                     var ut8bytes = toUTF8Array(str);
@@ -2573,7 +2611,7 @@
                         return "\\" + ("00" + e).slice(-3);
                     });
                     return ut8bytes.join("");
-                });
+                });*/
     }
 
     function sanitizeRegExpSource(str) {

@@ -53,7 +53,10 @@ Date = function(this, ...)
         -- special behavior for year between 0 and 100
         if args[1] >= 0 and args[1] <100 then
             args[1] = 1900 + args[1]
+	else 
+	   assert(args[1]>1900,"require years >1900 or <100")
         end
+	
         -- more than 1 arguments
         -- year, month, day, hour, minute, second, millisecond
         timestamp = time{year=args[1],

@@ -504,7 +504,7 @@ local function scantable (what, closechar, str, startpos, nullval, objectmeta, a
     if what == 'object' then
         setmetatable (tbl, objectmeta)
     else
-        setmetatable (tbl, arraymeta)
+      setmetatable (tbl, arraymeta)
     end
     while true do
         pos = scanwhite (str, pos)
@@ -560,10 +560,13 @@ scanvalue = function (str, pos, nullval, objectmeta, arraymeta)
     end
     local char = strsub (str, pos, pos)
     if char == "{" then
+            print('scan obj---')
         return scantable ('object', "}", str, pos, nullval, objectmeta, arraymeta)
     elseif char == "[" then
+      print('scan array---')
         return scantable ('array', "]", str, pos, nullval, objectmeta, arraymeta)
     elseif char == "\"" then
+                  print('scan \\')
         return scanstring (str, pos)
     else
         local pstart, pend = strfind (str, "^%-?[%d%.]+[eE]?[%+%-]?%d*", pos)
@@ -666,6 +669,11 @@ function json.use_lpeg ()
             nt = nt + 1
             t[nt] = obj
         until cont == 'last'
+        if t[1]~=nil then 
+          t.length=#t
+          t[0]=t[1]
+          tremove(t,1)
+        end
         return pos, setmetatable (t, state.arraymeta)
     end
 

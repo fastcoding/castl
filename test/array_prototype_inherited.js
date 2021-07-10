@@ -291,7 +291,7 @@ assert(arr12[3] === 10);
 arr12 = new MyClass();
 arr12.push(10, -6, -11, 2);
 ret = arr12.sort(function (a, b) {
-    return a > b
+    return a > b?1:(a<b?-1:0)
 });
 assert(ret === arr12);
 assert(ret == arr12);
@@ -309,7 +309,7 @@ assert(arr12[3] === 10);
 arr12 = new MyClass();
 arr12.push(10, -6, -11, 2);
 ret = arr12.sort(function (a, b) {
-    return a < b
+    return a < b?1:(a>b?-1:0)
 });
 assert(ret === arr12);
 assert(ret == arr12);

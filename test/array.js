@@ -1,7 +1,7 @@
 var assert = require("assert");
 
 var a = new Array(21);
-var b = new Array(21, "pp", "test");
+var b = new Array(21, "pp", "test",-22);
 var c = Array(21);
 var d = Array(21, "foo", "bar");
 var e = [];
@@ -10,10 +10,11 @@ var f = [8, 12, "abs"];
 assert(a.length === 21);
 assert(typeof a[0] === "undefined");
 
-assert(b.length === 3);
+assert(b.length === 4);
 assert(b[0] === 21);
 assert(b[2] === "test");
-assert(typeof b[3] === "undefined");
+assert(b[3] === -22);
+assert(typeof b[4] === "undefined");
 
 assert(c.length === 21);
 assert(typeof c[0] === "undefined");

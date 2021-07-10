@@ -86,7 +86,6 @@ local radixDigit = {
 function globalFunctions.parseInt(this, str, radix)
     radix = radix or 10
     local tstr = type(str)
-
     -- shortcut: parseInt used as a cast to int
     if tstr == "number" and radix == 10 then
         return str < 0 and ceil(str) or floor(str)

@@ -38,7 +38,11 @@ local EvalError = require("castl.constructor.error.eval_error")
 local RegExp = require("castl.constructor.regexp")
 local Math = require("castl.math")
 local eval = require("castl.eval")
-
+local setmetatable,getmetatable,setfenv,getfenv=setmetatable,getmetatable,setfenv,getfenv
+local wrap_fun=function(f)
+	local fenv=getfenv(2)
+	return setfenv(f,setmetatable({},{__index=fenv,__newindex=fenv}))
+end
 -- load prototypes definitions
 protos.loadPrototypesDefinition()
 
@@ -93,6 +97,8 @@ local export = {
     _new = coreObjects.new,
     _instanceof = coreObjects.instanceof,
     _props = coreObjects.props,
+    _wrap_fun = wrap_fun,
+
     this = coreObjects.this,
 
     -- constructors

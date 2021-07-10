@@ -221,7 +221,7 @@ return function(arrayPrototype)
         -- shift from 0-based to 1-based index
         insert(this, 1, this[0])
         rawset(this, 0, nil)
-
+	io.stdout:write('sort called\n')
         -- sort
         sort(this, function (a, b)
             if b == nil and a ~= nil then
