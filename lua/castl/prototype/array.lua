@@ -221,7 +221,7 @@ return function(arrayPrototype)
         -- shift from 0-based to 1-based index
         insert(this, 1, this[0])
         rawset(this, 0, nil)
-	io.stdout:write('sort called\n')
+	
         -- sort
         sort(this, function (a, b)
             if b == nil and a ~= nil then
@@ -324,6 +324,22 @@ return function(arrayPrototype)
         end
 
         return arg
+    end
+
+    arrayPrototype.findIndex=function(this,callback,thisArg)
+        local ret = {}
+
+        thisArg = getThisArg(thisArg)
+
+        for i = 0, this.length - 1 do
+            if this[i] ~= nil then
+                local v = callback(thisArg, this[i], i, this)
+                if v then 
+                   return i
+                end
+            end
+        end
+        return -1
     end
 
     arrayPrototype.map = function (this, callback, thisArg)

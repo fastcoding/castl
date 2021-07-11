@@ -864,11 +864,11 @@
         compiledForInStatement.push(", true);\n");
 
         if (statement.left.type === "VariableDeclaration") {
-            compiledLeft = compilePattern(statement.left.declarations[0].id);
+            compiledLeft = compilePattern(statement.left.declarations[0].id,'for_in');
             // Add to current local context, but var in for is already lexically local
             //localVarManager.pushLocal(compiledLeft);
         } else {
-            compiledLeft = compileExpression(statement.left);
+            compiledLeft = compileExpression(statement.left,'for_in');
         }       
         compiledForInStatement.push("for _,");
         compiledForInStatement.push(compiledLeft);
@@ -2869,7 +2869,7 @@
             return siname;
         }
         
-        if (meta==='param' || meta==='label'||meta==='global'){
+        if (meta==='param' || meta==='label'||meta==='global'||meta==='for_in'){
             return siname;
         }
 
