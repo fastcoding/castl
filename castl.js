@@ -66,7 +66,7 @@
         var lastTp;
         if (!sep){
             sep='';
-        }
+        }        
         //console.log('before merge:['+sep+']',JSON.stringify(arr),JSON.stringify(src));
         src.forEach(function(v,idx){
             var curTp=typeof(v)
@@ -173,6 +173,7 @@
                 if (v.value){
                     return v.value;
                 }
+                //console.log('unresolved identifier:',v)
                 return v.name;
             }).join(sep)
         },
@@ -323,8 +324,16 @@
             this.pathNums[this.functions.length-1]++;
             //console.log('enter path: '+this.getVarPath());
         },
+
+        printUnresolved:function(){
+            this.unresolved.forEach(function(v,i){
+                if(v.name==='isArray'){
+                    //console.log(v);
+                }
+            })
+        },
         
-        registerUnresolvedVar:function(name,resolved_level){  
+        addUnresolvedVar:function(name,resolved_level){  
             var path=this.getVarPath(); 
             var resolved_path,resolved_value
             if (resolved_level!==undefined){
@@ -332,11 +341,22 @@
                 resolved_value='_local'+(resolved_level+1)+'.'+name;
             }             
             var va={name:name,path:path,value:resolved_value,resolvedPath:resolved_path};
-            if (this.unresolved.findIndex(function(v){
-                return v.name==name && v.path==path;
-            })<0){
+            var idx=this.unresolved.findIndex(function(v){
+                return v.name===name && v.path===path;
+            });
+            if (idx<0){
                 this.unresolved.push(va);
                 //console.log('register name:',va);
+            }else if (resolved_level){
+                var v=this.unresolved[idx];
+                if (!v.resolvedPath || resolved_path.length>v.resolvedPath.length){                    
+                    v.resolvedPath=resolved_path;
+                    v.value=resolved_value;      
+                    //console.log('resolve var:'+name + ' to '+curpath) ;
+                }
+                va=v;
+            }else{
+               va=this.unresolved[idx];
             }
             return va;
         },
@@ -352,7 +372,7 @@
                         v.resolvedPath=curpath       
                         //console.log('resolve var:'+name + ' to '+curpath) ;
                     }else{
-                        //console.log('skip path: ' + curpath);
+                        //console.log('skip path: ' + curpath+':'+name);
                     }
                     changed++;
                 }
@@ -376,7 +396,7 @@
                 var idx=this.locals[i].indexOf(id);
                 if (idx>=0){                    
                     if (i<this.locals.length-1){                                               
-                      return this.registerUnresolvedVar(id,i);                       
+                      return this.addUnresolvedVar(id,i);                       
                     }
                     return '_local'+(i+1)+'.'+id; //already nearest var
                 }
@@ -483,6 +503,7 @@
             // Body of the program
             compiledProgram.push(topLevelStatements);
            // console.log('program:',JSON.stringify(compiledProgram,null,2));
+            //localVarManager.printUnresolved();
             return ({
                 success: true,
                 compiled: compiledProgram.joinFinal("\n")
@@ -1787,14 +1808,16 @@
 
     function compileCallExpression(expression, meta) {
         var compiledCallExpression = new CompileResult();
-        var compiledCallee = compileExpression(expression.callee,{});
+        var compiledCallee = compileExpression(expression.callee);
         var compiledArguments = compileCallArguments(expression.arguments);
 
         // If callee is method of an object
         if (expression.callee.type === "MemberExpression") {
             // If end by a bracket
             var calleeStr=compiledCallee.toString();
-            //console.log('calleestr=',calleeStr, ' from ',compiledCallee)
+            
+            //console.log('calleestr contains isArray from ',JSON.stringify(compiledCallee,null,2));            
+           
             if (calleeStr.match(/\]$/)) {
                 //
                 var startIndex,base,member
@@ -2561,7 +2584,7 @@
             compiledMemberExpression.push(compileExpression(expression.property));
             compiledMemberExpression.push("]");
         } else {
-            var compiledProperty = compileIdentifier(expression.property);
+            //var compiledProperty = compileIdentifier(expression.property);
 
             if (sanitizeIdentifier(expression.property.name) !== expression.property.name) {
                 compiledMemberExpression.push("[\"");
@@ -2637,9 +2660,9 @@
 
     function compileFunctionDeclaration(declaration) {
         var compiledFunctionDeclaration = new CompileResult();
-        var compiledId = compileIdentifier(declaration.id,'global');
+        var compiledId = compileIdentifier(declaration.id);
         //console.log('function decelare:',compiledId)
-        //localVarManager.pushLocal(compiledId);
+        localVarManager.pushLocal(compiledId.name);
         compiledFunctionDeclaration.push(compiledId); //lovar: replace compiledId with stack_var.id
         compiledFunctionDeclaration.push(" =(");
         compiledFunctionDeclaration.push(compileFunction(declaration));
@@ -2663,7 +2686,7 @@
             for (i = 0; i < declarations.length; ++i) {
                 declarator = declarations[i];
                 //lovar:
-                pattern = compilePattern(declarator.id,true);
+                pattern = compilePattern(declarator.id,"var");
 
                 // Add to current local context
                 //if (!declarator.init){
@@ -2860,7 +2883,10 @@
         //console.log('identifier:',identifier.name,meta)
         
         var siname=sanitizeIdentifier(iname);
-        
+        /*if (iname.match(/^(?:global|Object|RegExp|Array)/)){
+
+        }*/
+
         if (options.luaLocal){
             return siname;
         }
@@ -2873,7 +2899,7 @@
             return siname;
         }
 
-        if (meta===true){
+        if (meta==="var"){
             //lhs            
             return localVarManager.loVarName(siname);
         }
@@ -2885,7 +2911,7 @@
             return ret;        
         }
         //console.log('unable to find '+siname+' - register unresolved')
-        return localVarManager.registerUnresolvedVar(siname) //to be resolve!
+        return localVarManager.addUnresolvedVar(siname) //to be resolve!
     }
 
     // http://en.wikipedia.org/wiki/UTF-8#Description
