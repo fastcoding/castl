@@ -18,7 +18,7 @@
   },
   "main": "castl.js",
   "scripts": {
-    "test": "node runTests.js --jit"
+    "test": "node runTests.js --jit "
   },
   "bin": {
     "castl": "./bin/castl.js"

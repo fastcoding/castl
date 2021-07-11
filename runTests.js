@@ -34,7 +34,7 @@
     var program = require('commander');
     program
         .option('--jit', 'Test using LuaJIT')
-        .option('--acorn', 'Test using Acorn')
+        .option('--acorn', 'Test using Acorn') 
         .parse(process.argv);
 
     var parserName = program.acorn ? "acorn" : "esprima";

@@ -15,6 +15,8 @@
     along with CASTL. If not, see <http://www.gnu.org/licenses/>.
 */
 
+const { parseOptions } = require('commander');
+
 (function () {
     "use strict";
     process.env['LUA_PATH'] = process.env['LUA_PATH'] + ";./lua/?.lua;/usr/local/lib/node_modules/castl/lua/?.lua;/usr/lib/node_modules/castl/lua/?.lua;";
@@ -41,6 +43,7 @@
         .option('-v, --verbose', 'Verbose, print the compiled code to be run')
         .option('-n, --linenumber', 'Print line numbers if -v or --cat options are active')
         .option('-a, --annotation', 'Use annotations to optimize generated code')
+        .option('-l, --limited', 'Use lua local for js var, limited to 200 vars in each scope')
         .option('-g, --heuristic', 'Enable heuristic compilation')
         .option('--babel', 'Run Babel on the code to transform ES6 code to ES5 code compatible with castl transpiler')
         .option('--cat', 'Don\'t execute, just print the code that would be run')
@@ -138,6 +141,7 @@
         }
     }
 
+    castlOptions.luaLocal=!!program.limited
     // Read, parse and transpile JS code
 
     var data, ast, compiledCode;
@@ -167,7 +171,8 @@
 
         compiledCode = castl.compileAST(ast, castlOptions, annotations).compiled;
     } catch (e) {
-        throw new SyntaxError("Couldn't transpile JS code: " + e);
+        console.error(e);
+        throw new SyntaxError("Couldn't transpile JS code: " + e);        
     }
 
     // Add environment

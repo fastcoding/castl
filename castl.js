@@ -51,7 +51,139 @@
                 meta.type = deductions[node.loc.start.line];
             }
         }
+        
     }
+
+    function CompileResult(arr,sep) {
+        this.array=arr || [];        
+        this.sep=sep || '';
+        return this;
+    }
+    function isNumOrString(d){
+        return ['string','number'].indexOf(d)>=0;
+    }
+    function _mergeArray(arr,src,sep){
+        var lastTp;
+        if (!sep){
+            sep='';
+        }
+        //console.log('before merge:['+sep+']',JSON.stringify(arr),JSON.stringify(src));
+        src.forEach(function(v,idx){
+            var curTp=typeof(v)
+            if (isCompileResultLike(v)){
+                if (v.array && v.array.length>0){
+                    arr.push(v); 
+                }           
+            }else{
+                if (v!==''){
+                    if (idx===0){
+                        arr.push(v);
+                    }else{                        
+                        if (isNumOrString(lastTp) && isNumOrString(curTp)){
+                            arr[arr.length-1]+=sep+v;
+                        }else{                             
+                            arr.push(v);
+                        }
+                    }
+                }                
+            }            
+            lastTp=curTp;
+        });
+        //console.log('after merge:',JSON.stringify(arr));
+        return arr;
+    }
+    function isCompileResultLike(anyObj){
+        return (anyObj.prototype && anyObj.prototype.constructor.name==='CompileResult')||(anyObj.array!=undefined && anyObj.sep!=undefined);
+    }
+    CompileResult.prototype={
+        push:function(anyObj){
+            var tp=typeof(anyObj)
+            if (tp==='string' || tp==='number'){
+                this.array.push(anyObj);                
+            }else if (tp==='object'){ 
+               if (isCompileResultLike(anyObj)){                  
+                   this.pushOther(anyObj);                
+               }else if(anyObj.name){
+                   this.array.push(anyObj);
+               }else{
+                    console.error("invalid object:",anyObj.prototype ,JSON.stringify(anyObj,null,2));
+               }
+            }else{
+                console.error("invalid type:",JSON.stringify(anyObj,null,2));
+            }
+            return this
+        },
+        pop:function(){
+            return this.array.pop();
+        },
+        toString:function(){
+            return this.array.map(function(v){
+                return isNumOrString(typeof(v))?v:(isCompileResultLike(v)?v.toString():(v.value||v.name))
+            }).join(this.sep);
+        },
+
+        quote:function(q){
+            q||='"'
+            this.array.unshift(q);
+            this.array.push(q);
+            return this;
+        },
+        
+        slice:function(s,e){
+            return new CompileResult(this.array.slice(s,e),this.sep);
+        },
+        mergeSelf:function(sep){
+            if (!sep){
+                sep=this.sep;
+            }
+            this.array=_mergeArray([],this.array,sep);
+            return this;
+        },
+        indexOf:function(s){
+            return this.array.findIndex(function(v){
+                if(isNumOrString(typeof(v))) return v==s;
+                if (typeof(v)==='object') return v.name===s;
+                return false;
+            });
+        }, 
+        prepend:function(s){
+            this.array.unshift(s);
+            return this;
+        },
+        pushOther:function(cr,sep){
+            if (sep===undefined){
+                sep=cr.sep;
+            }
+            if (this.sep===sep){
+                _mergeArray(this.array,cr.array,sep);
+            }else{
+                this.array.push(cr)
+            }            
+        },
+        joinFinal:function(sep){
+            if (sep===undefined) sep=this.sep;           
+            return this.array.filter(function(v){return v!==''}).map(function(v){
+                if (isNumOrString(typeof(v))) return v;
+                if (isCompileResultLike(v)){
+                    return v.joinFinal(v.sep);
+                }    
+                if (typeof(v.name)!=='string'){
+                    console.error('name unexpected:',v)
+                }
+                if (v.value){
+                    return v.value;
+                }
+                return v.name;
+            }).join(sep)
+        },
+        join:function(sep){
+            if (sep===undefined){
+                sep=this.sep;
+            }
+            return this.mergeSelf(sep);
+        }        
+    }
+
 
     /********************************
      *
@@ -156,27 +288,81 @@
      * ******************************/
 
     function LocalVarManager() {
+        this.pathNums=[];        
+        this.unresolved=[];
         this.locals = []; // Array of arrays
         this.functions = []; // Array of arrays
         this.args = []; // Array of booleans
-    }
+    }    
 
     LocalVarManager.prototype = {
+        reset:function(){
+            this.pathNums=[];  
+            this.unresolved=[]; 
+            this.params=[];
+            this.locals = []; // Array of arrays
+            this.functions = []; // Array of arrays
+            this.args = []; // Array of booleans
+        },
         popLocalContext: function () {
             // @number
             if (this.locals.length > 0) {
-                return [this.locals.pop(), this.args.pop(), this.functions.pop()];
+                return [this.locals.pop(), this.args.pop(), this.functions.pop(),this.params.pop()];
             }
-
             throw new Error("LocalVarManager error: no current local context");
         },
 
-        createLocalContext: function () {
+        createLocalContext: function () {            
             this.locals.push([]);
             this.functions.push([]);
+            this.params.push([]);
             this.args.push(false);
+            while (this.pathNums.length<this.functions.length){
+                this.pathNums.push(0);
+            }
+            this.pathNums[this.functions.length-1]++;
+            //console.log('enter path: '+this.getVarPath());
         },
         
+        registerUnresolvedVar:function(name,resolved_level){  
+            var path=this.getVarPath(); 
+            var resolved_path,resolved_value
+            if (resolved_level!==undefined){
+                resolved_path=this.pathNums.slice(0,resolved_level+1).join('.');
+                resolved_value='_local'+(resolved_level+1)+'.'+name;
+            }             
+            var va={name:name,path:path,value:resolved_value,resolvedPath:resolved_path};
+            if (this.unresolved.findIndex(function(v){
+                return v.name==name && v.path==path;
+            })<0){
+                this.unresolved.push(va);
+                //console.log('register name:',va);
+            }
+            return va;
+        },
+        resolveVar:function(name){  
+            var curpath=this.getVarPath();
+            var changed=0;
+            name=name.replace(/^[^\.]*\./g,'');
+            
+            this.unresolved.forEach((function(v){
+                if (name==v.name && v.path.slice(0,curpath.length)==curpath){                    
+                    if (!v.resolvedPath || curpath.length>v.resolvedPath.length){
+                        v.value=this.loVarName(name);
+                        v.resolvedPath=curpath       
+                        //console.log('resolve var:'+name + ' to '+curpath) ;
+                    }else{
+                        //console.log('skip path: ' + curpath);
+                    }
+                    changed++;
+                }
+            }).bind(this));
+           // console.log('try resolve name:'+name+'@'+curpath+' result:',changed)
+            return changed>0;
+        },
+        getVarPath:function(){
+           return this.pathNums.slice(0,this.functions.length).join('.');
+        },
         loVarsName: function(){
             return '_local'+(this.functions.length+1)
         },
@@ -184,20 +370,32 @@
             return '_local'+this.functions.length+'.'+id
         },
         findLoVar: function(id){
+            //console.log('looking for ',id,this.locals[this.locals.length-1],this.params[this.locals.length-1]);
             for(var i=this.locals.length-1;i>=0;i--){
+                //var i=this.locals.length-1;
                 var idx=this.locals[i].indexOf(id);
-                if (idx>=0){
-                    return '_local'+i+'.'+id;
-                }     
-            }   
-            return id
+                if (idx>=0){                    
+                    if (i<this.locals.length-1){                                               
+                      return this.registerUnresolvedVar(id,i);                       
+                    }
+                    return '_local'+(i+1)+'.'+id; //already nearest var
+                }
+                else {
+                    //check params
+                    if (this.params[i].indexOf(id)>=0){
+                        return id; //resolved as function param, maybe uppervalue
+                    }
+                }
+            }                        
+            return null;
         },
         pushLocal: function (varName) {
             // @number
             if (this.locals.length > 0) {
-                //varName=varName.replace(/^[^\.]*\./g,'');
+                varName=varName.replace(/^[^\.]*\./g,'');                
                 //console.log('add local '+varName)
                 this.locals[this.locals.length - 1].push(varName);
+                this.resolveVar(varName);
             } else {
                 throw new Error("LocalVarManager error: no current local context");
             }
@@ -209,6 +407,12 @@
                 this.functions[this.functions.length - 1].push(functionDeclaration);
             } else {
                 throw new Error("LocalVarManager error: no current local context");
+            }
+        },
+
+        pushParam:function(pn){
+            if (this.params.length > 0) {
+                this.params[this.params.length - 1].push(pn);
             }
         },
 
@@ -234,11 +438,13 @@
     function compileAST(ast, opts, anno) {
         options = opts || {};
         annotations = anno || {};
-
+        if (options.luaLocal){
+            console.log('limited mode enabled - limited to 200 js vars each scope')
+        }
         // Compile top level
-        if (ast.type === 'Program') {
-            var compiledProgram = [];
-
+        if (ast.type === 'Program') {            
+            var compiledProgram = new CompileResult([],'\n');
+            localVarManager.reset();
             localVarManager.createLocalContext();
             var topLevelStatements = compileListOfStatements(ast.body);
 
@@ -253,19 +459,21 @@
             // Locals
             var locals = context[0];
             // @number
-            if (locals.length > 0) {
-                var compiledLocalsDeclaration = buildLocalsDeclarationString(locals);
+            if (locals.length > 0) {                
+                //console.log('program locals:',locals)             
+                var compiledLocalsDeclaration = buildLocalsDeclarationString(locals);  
+                //console.log('compiled locals:',compiledLocalsDeclaration)                    
                 compiledProgram.push(compiledLocalsDeclaration);
             }
 
             // Function declarations
-            var functions = context[2];
+            var functions = context[2];            
             // @number
             if (functions.length > 0) {
-                var compiledFunctionsDeclaration = [];
+                var compiledFunctionsDeclaration = new CompileResult([]);
                 var i;
                 // @number
-                for (i = 0; i < functions.length; ++i) {
+                for (i = 0; i < functions.length; ++i) {                    
                     compiledFunctionsDeclaration.push(functions[i]);
                 }
 
@@ -274,10 +482,10 @@
 
             // Body of the program
             compiledProgram.push(topLevelStatements);
-
+           // console.log('program:',JSON.stringify(compiledProgram,null,2));
             return ({
                 success: true,
-                compiled: compiledProgram.join("\n")
+                compiled: compiledProgram.joinFinal("\n")
             });
         }
 
@@ -358,15 +566,16 @@
         if (compiledStatement !== undefined) {
             if (options.debug) {
                 var line = statement.loc.start.line;
+                //console.log('compiled statment: type:',statement.type,compiledStatement)
                 // @string
-                return "--[[" + line + "--]] " + compiledStatement;
+                return new CompileResult(["--[[" + line + "--]] "]).push( compiledStatement);
             }
             return compiledStatement;
         }
     }
 
     function compileListOfStatements(statementList) {
-        var compiledStatements = [];
+        var compiledStatements =  new CompileResult([],'\n');
 
         var i, compiledStatement;
         // @number
@@ -380,11 +589,11 @@
             }
         }
 
-        return compiledStatements.join("\n");
+        return compiledStatements;
     }
 
     function compileBooleanExpression(expression) {
-        var compiledBooleanExpression = [];
+        var compiledBooleanExpression =  new CompileResult();
         var meta = {};
         var compiledExpression = compileExpression(expression, meta);
 
@@ -396,11 +605,11 @@
             compiledBooleanExpression.push(")");
         }
 
-        return compiledBooleanExpression.join("");
+        return compiledBooleanExpression;
     }
 
     function compileIfStatement(statement, elif) {
-        var compiledIfStatement = [];
+        var compiledIfStatement =  new CompileResult();
 
         if (elif) {
             compiledIfStatement.push("elseif ");
@@ -430,7 +639,7 @@
             compiledIfStatement.push("end\n");
         }
 
-        return compiledIfStatement.join('');
+        return compiledIfStatement;
     }
 
     function compileIterationStatement(statement, compiledLabel) {
@@ -462,7 +671,7 @@
     }
 
     function compileForInit(init) {
-        var compiledForInit = [];
+        var compiledForInit =  new CompileResult();
         if (init !== null) {
             if (init.type === "VariableDeclaration") {
                 compiledForInit.push(compileVariableDeclaration(init));
@@ -472,17 +681,17 @@
             compiledForInit.push("\n");
         }
 
-        return compiledForInit.join("");
+        return compiledForInit;
     }
 
     function compileForUpdate(update) {
-        var compiledForUpdate = [];
+        var compiledForUpdate =  new CompileResult();
         if (update !== null) {
             compiledForUpdate.push(compileExpressionStatement(update));
             compiledForUpdate.push("\n");
         }
 
-        return compiledForUpdate.join("");
+        return compiledForUpdate;
     }
 
     function compileForTest(test) {
@@ -554,7 +763,7 @@
     }
 
     function mayBeNumericFor(statement) {
-        var possibleNumericForVariable = [];
+        var possibleNumericForVariable =  [];
 
         var init = statement.init;
         if (init === null) {
@@ -606,7 +815,7 @@
     }
 
     function compileForStatement(statement, compiledLabel) {
-        var compiledForStatement = [];
+        var compiledForStatement = new CompileResult();
 
         if (options.heuristic) {
             if (mayBeNumericFor(statement)) {
@@ -631,7 +840,7 @@
         if (continueNoLabelTracker[continueNoLabelTracker.length - 1]) {
             compiledForStatement.push("::_continue::\n");
         }
-
+        
         // Label for continue with label
         if (compiledLabel && labelTracker[compiledLabel].mayContinue) {
             // @string
@@ -643,11 +852,11 @@
 
         compiledForStatement.push("end\n");
 
-        return compiledForStatement.join("");
+        return compiledForStatement;
     }
 
     function compileForInStatement(statement, compiledLabel) {
-        var compiledForInStatement = [];
+        var compiledForInStatement = new CompileResult();
         var compiledLeft;
 
         compiledForInStatement.push("local _p = _props(");
@@ -655,13 +864,12 @@
         compiledForInStatement.push(", true);\n");
 
         if (statement.left.type === "VariableDeclaration") {
-            compiledLeft = compilePattern(statement.left.declarations[0].id,true);
+            compiledLeft = compilePattern(statement.left.declarations[0].id);
             // Add to current local context, but var in for is already lexically local
             //localVarManager.pushLocal(compiledLeft);
         } else {
             compiledLeft = compileExpression(statement.left);
-        }
-
+        }       
         compiledForInStatement.push("for _,");
         compiledForInStatement.push(compiledLeft);
         compiledForInStatement.push(" in _ipairs(_p) do\n");
@@ -686,11 +894,11 @@
 
         compiledForInStatement.push("end\n");
 
-        return compiledForInStatement.join("");
+        return compiledForInStatement;
     }
 
     function compileWhileStatement(statement, compiledLabel) {
-        var compiledWhileStatement = ["while "];
+        var compiledWhileStatement = new CompileResult(["while "]);
 
         // Test
         compiledWhileStatement.push(compileBooleanExpression(statement.test));
@@ -711,11 +919,11 @@
 
         compiledWhileStatement.push("end\n");
 
-        return compiledWhileStatement.join("");
+        return compiledWhileStatement;
     }
 
     function compileDoWhileStatement(statement, compiledLabel) {
-        var compiledDoWhileStatement = ["repeat\n"];
+        var compiledDoWhileStatement = new CompileResult(["repeat\n"]);
 
         // Body
         compiledDoWhileStatement.push(compileStatement(statement.body));
@@ -735,7 +943,7 @@
         compiledDoWhileStatement.push(compileBooleanExpression(statement.test));
         compiledDoWhileStatement.push("\n");
 
-        return compiledDoWhileStatement.join("");
+        return compiledDoWhileStatement;
     }
 
     function isIterationStatement(statement) {
@@ -746,10 +954,10 @@
     }
 
     function compileLabeledStatement(statement) {
-        var compiledLabeledStatement = [];
+        var compiledLabeledStatement = new CompileResult();
 
         var label = statement.label;
-        var compiledLabel = compileIdentifier(label);
+        var compiledLabel = compileIdentifier(label,'label');
 
         // create tracker for this label
         labelTracker[compiledLabel] = {
@@ -771,7 +979,7 @@
         // delete tracker for this label
         delete labelTracker[compiledLabel];
 
-        return compiledLabeledStatement.join("");
+        return compiledLabeledStatement;
     }
 
     function compileBreakStatement(statement) {
@@ -787,10 +995,10 @@
             }
         }
 
-        var compiledLabel = compileIdentifier(statement.label);
+        var compiledLabel = compileIdentifier(statement.label,'label');
         labelTracker[compiledLabel].mayBreak = true;
         // @string
-        return "goto " + compiledLabel + "_b;";
+        return new CompileResult(["goto " , compiledLabel , "_b;"],'');
     }
 
     // http://lua-users.org/wiki/ContinueProposal
@@ -803,13 +1011,13 @@
                 return "do return _continue; end";
             }
 
-            return "goto _continue";
+            return new CompileResult(["goto _continue"],'');
         }
 
-        var compiledLabel = compileIdentifier(statement.label);
+        var compiledLabel = compileIdentifier(statement.label,'label');
         labelTracker[compiledLabel].mayContinue = true;
         // @string
-        return "goto " + compiledLabel + "_c;";
+        return new CompileResult(["goto " , compiledLabel , "_c;"]);
     }
 
     function compileSwitchStatement(statement) {
@@ -820,11 +1028,11 @@
         // @number
         if (cases.length > 0) {
             // Use a useless repeat loop to be able to use break
-            var compiledSwitchStatement = ["repeat\nlocal _into = false;\n"];
+            var compiledSwitchStatement = new CompileResult(["repeat\nlocal _into = false;\n"]);
 
             // Construct lookup table
             var i;
-            var casesTable = [];
+            var casesTable = new CompileResult();
             var caseTablementElement;
             var compiledTests = [];
             // @number
@@ -832,12 +1040,12 @@
                 if (cases[i].test !== null) {
                     compiledTests[i] = compileExpression(cases[i].test);
 
-                    caseTablementElement = [];
+                    caseTablementElement = new CompileResult();
                     caseTablementElement.push("[");
                     caseTablementElement.push(compiledTests[i]);
                     caseTablementElement.push("] = true");
 
-                    casesTable.push(caseTablementElement.join(""));
+                    casesTable.push(caseTablementElement);
                 }
             }
 
@@ -883,7 +1091,7 @@
             compiledSwitchStatement.push("until true");
 
             protectedCallManager.closeSwitchStatement();
-            return compiledSwitchStatement.join("");
+            return compiledSwitchStatement;
         }
 
         protectedCallManager.closeSwitchStatement();
@@ -912,7 +1120,7 @@
 
         // Protected call
         protectedCallManager.openContext();
-        var compiledTryStatement = ["local _status, _return = _pcall(function()\n"];
+        var compiledTryStatement = new CompileResult(["local _status, _return = _pcall(function()\n"]);
         compiledTryStatement.push(compileListOfStatements(statement.block.body));
         compiledTryStatement.push("\n");
         compiledTryStatement.push("end);\n");
@@ -991,15 +1199,15 @@
 
         compiledTryStatement.push("end\n");
 
-        return compiledTryStatement.join("");
+        return compiledTryStatement;
     }
 
     function compileThrowStatement(statement) {
-        var compiledThrowStatement = ["_throw("];
+        var compiledThrowStatement = new CompileResult(["_throw("]);
         compiledThrowStatement.push(compileExpression(statement.argument));
         compiledThrowStatement.push(",0)");
 
-        return compiledThrowStatement.join("");
+        return compiledThrowStatement;
     }
 
     function compileReturnStatement(statement) {
@@ -1007,7 +1215,7 @@
 
         if (statement.argument !== null) {
             // @string
-            return "do return " + compileExpression(statement.argument,{}) + "; end";
+            return new CompileResult(["do return " , compileExpression(statement.argument,{}) , "; end"]);
         }
 
         return "do return end";
@@ -1015,7 +1223,7 @@
 
     function compileWithStatement(statement) {
         withTracker.push(true);
-        var compiledWithStatement = ["do\n"];
+        var compiledWithStatement = new CompileResult(["do\n"]);
 
         // with
         compiledWithStatement.push("local _oldENV = _ENV;\n");
@@ -1037,7 +1245,7 @@
         compiledWithStatement.push("\nend");
 
         withTracker.pop();
-        return compiledWithStatement.join("");
+        return compiledWithStatement;
     }
 
     /*******************
@@ -1105,10 +1313,10 @@
     // Add a semi-colon at the end of ExpressionStatements
     function compileExpressionStatementEvalMode(expression, meta) {
         // Enclose the statement in a _e to be evaluated
-        var compiledExpressionStatement = ["_e("];
+        var compiledExpressionStatement = new CompileResult(["_e("]);
         compiledExpressionStatement.push(compileExpression(expression, meta));
         compiledExpressionStatement.push(");");
-        return compiledExpressionStatement.join("");
+        return compiledExpressionStatement;
     }
 
     // Add a semi-colon at the end of ExpressionStatements
@@ -1120,17 +1328,17 @@
             return;
         case "UpdateExpression":
             // @string
-            return compileUpdateExpressionNoEval(expression, meta) + ";";
+            return compileUpdateExpressionNoEval(expression, meta).push(";");
         case "AssignmentExpression":
             // @string
-            return compileAssignmentExpressionNoEval(expression, meta) + ";";
+            return compileAssignmentExpressionNoEval(expression, meta).push(";");
         case "BinaryExpression":
         case "LogicalExpression":
         case "ConditionalExpression":
         case "MemberExpression":
         case "FunctionExpression":
             // Enclose the statement in a _e to be evaluated
-            var compiledExpressionStatement = ["_e("];
+            var compiledExpressionStatement = new CompileResult(["_e("]);
             compiledExpressionStatement.push(compileExpression(expression, meta));
             compiledExpressionStatement.push(");");
             return compiledExpressionStatement.join("");
@@ -1138,20 +1346,20 @@
             // ! operator conversion is not enclosed in a function
             // so we enclose it in _e
             if (expression.operator === "!") {
-                var compiledUnaryExpressionStatement = ["_e("];
+                var compiledUnaryExpressionStatement = new CompileResult(["_e("]);
                 compiledUnaryExpressionStatement.push(compileUnaryExpression(expression, meta));
                 compiledUnaryExpressionStatement.push(");");
                 return compiledUnaryExpressionStatement.join("");
             }
             // @string
-            return compileUnaryExpression(expression, meta) + ";";
+            return compileUnaryExpression(expression, meta).push(";");
         case "CallExpression":
         case "NewExpression":
         case "ArrayExpression":
         case "ObjectExpression":
         case "SequenceExpression":
             // @string
-            return compileExpression(expression, meta) + ";";
+            return compileExpression(expression, meta).push(";");
         case "YieldExpression":
             throw new Error("Yield expression not supported yet.");
         default:
@@ -1161,7 +1369,7 @@
     }
 
     function compileCompoundAssignmentBinaryExpression(left, right, operator, metaLeft, metaRight, meta) {
-        var compiledCompoundAssignmentBinaryExpression = ["("];
+        var compiledCompoundAssignmentBinaryExpression = new CompileResult(["("]);
 
         switch (operator) {
             // Bits shift
@@ -1265,7 +1473,7 @@
 
         compiledCompoundAssignmentBinaryExpression.push(")");
 
-        return compiledCompoundAssignmentBinaryExpression.join('');
+        return compiledCompoundAssignmentBinaryExpression;
     }
 
     function storeComputedProperty(expression) {
@@ -1282,7 +1490,7 @@
     }
 
     function compileCompoundAssignmentNoEval(expression) {
-        var compiledAssignmentBinaryExpression = [];
+        var compiledAssignmentBinaryExpression = new CompileResult();
         var mustStore = storeComputedProperty(expression.left);
         var metaLeft = {},
             metaRight = {};
@@ -1309,11 +1517,11 @@
             compiledAssignmentBinaryExpression.push(" end");
         }
 
-        return compiledAssignmentBinaryExpression.join("");
+        return compiledAssignmentBinaryExpression;
     }
 
     function compileAssignmentExpressionNoEval(expression) {
-        var compiledAssignmentExpression = [];
+        var compiledAssignmentExpression = new CompileResult();
 
         switch (expression.operator) {
             // Regular assignement
@@ -1329,11 +1537,11 @@
             return compileCompoundAssignmentNoEval(expression);
         }
 
-        return compiledAssignmentExpression.join('');
+        return compiledAssignmentExpression;
     }
 
     function compileAssignmentExpression(expression, meta) {
-        var compiledAssignmentExpression = ["(function() "];
+        var compiledAssignmentExpression = new CompileResult(["(function() "]);
         var mustStore = storeComputedProperty(expression.left);
         var metaLeft = {},
             metaRight = {};
@@ -1371,11 +1579,11 @@
         compiledAssignmentExpression.push(left);
         compiledAssignmentExpression.push(" end)()");
 
-        return compiledAssignmentExpression.join('');
+        return compiledAssignmentExpression;
     }
 
     function compileUpdateExpressionNoEval(expression) {
-        var compiledUpdateExpression = [];
+        var compiledUpdateExpression = new CompileResult();
         var mustStore = storeComputedProperty(expression.argument);
         var metaArgument = {};
         var compiledArgument = compileExpression(expression.argument, metaArgument);
@@ -1424,11 +1632,11 @@
             compiledUpdateExpression.push(";end");
         }
 
-        return compiledUpdateExpression.join('');
+        return compiledUpdateExpression;
     }
 
     function compileUpdateExpression(expression, meta) {
-        var compiledUpdateExpression = ["(function () "];
+        var compiledUpdateExpression = new CompileResult(["(function () "]);
         var mustStore = storeComputedProperty(expression.argument);
         var metaArgument = {};
         var compiledArgument = compileExpression(expression.argument, metaArgument);
@@ -1510,7 +1718,7 @@
             meta.type = "number";
         }
 
-        return compiledUpdateExpression.join('');
+        return compiledUpdateExpression;
     }
 
     // Replace the character in str at the given index by char
@@ -1542,8 +1750,31 @@
         return startIndex;
     }
 
+    function lastTopLevelBracketedGroupStartIndex_a(str) {
+        var startIndex = 0,
+            count = 0,
+            i;
+        // @number
+        for (i = 0; i < str.length; ++i) {
+            var s=str[i];
+            if (typeof(s)!=='string') continue;
+            if (s.match(/^\[/)) {
+                if (count === 0) {
+                    startIndex = i;
+                }
+                // @number
+                count++;
+            } else if (str[i].match(/^\]/)){
+                // @number
+                count--;
+            }
+        }
+
+        return startIndex;
+    }
+
     function compileCallArguments(args) {
-        var compiledArguments = [];
+        var compiledArguments = new CompileResult([],',');
 
         var i;
         // @number
@@ -1551,41 +1782,66 @@
             compiledArguments.push(compileExpression(args[i]));
         }
 
-        return compiledArguments.join(',');
+        return compiledArguments;
     }
 
     function compileCallExpression(expression, meta) {
-        var compiledCallExpression = [];
+        var compiledCallExpression = new CompileResult();
         var compiledCallee = compileExpression(expression.callee,{});
         var compiledArguments = compileCallArguments(expression.arguments);
 
         // If callee is method of an object
         if (expression.callee.type === "MemberExpression") {
             // If end by a bracket
-            if (compiledCallee.match(/\]$/)) {
-                var startIndex = lastTopLevelBracketedGroupStartIndex(compiledCallee);
-                var base = compiledCallee.substr(0, startIndex);
-                // @number
-                var member = compiledCallee.substr(startIndex + 1);
-
+            var calleeStr=compiledCallee.toString();
+            //console.log('calleestr=',calleeStr, ' from ',compiledCallee)
+            if (calleeStr.match(/\]$/)) {
+                //
+                var startIndex,base,member
+                if (options.luaLocal){
+                    startIndex = lastTopLevelBracketedGroupStartIndex(calleeStr);
+                    base =calleeStr.substr(0, startIndex);
+                    member = calleeStr.substr(startIndex + 1);
+                }else{
+                    compiledCallee.array.forEach(function(v,idx){
+                        if(typeof(v)==='string' && v.match(/^\[/)){
+                            startIndex=idx;
+                        }
+                    });
+                    base =compiledCallee.slice(0,startIndex) ; 
+                    // @number
+                    member = compiledCallee.slice(startIndex); 
+                }                
                 compiledCallExpression.push("(function() local _this = ");
                 compiledCallExpression.push(base);
-                compiledCallExpression.push("; local _f = _this[");
+                compiledCallExpression.push("; local _f = _this");
                 compiledCallExpression.push(member);
                 compiledCallExpression.push("; return _f(_this");
 
-                if (compiledArguments !== "") {
+                if (expression.arguments.length >0 ) {
                     compiledCallExpression.push(",");
                     compiledCallExpression.push(compiledArguments);
                 }
-
                 compiledCallExpression.push("); end)()");
-            } else {
-                // Replace last occurence of '.' by ':'
-                var lastPointIndex = compiledCallee.lastIndexOf('.');
-                compiledCallee = replaceAt(compiledCallee, lastPointIndex, ':');
-                compiledCallExpression.push(compiledCallee);
+            } else {                
+                if (options.luaLocal){
+                    // Replace last occurence of '.' by ':'
+                    var lastPointIndex = calleeStr.lastIndexOf('.');
+                    compiledCallee = replaceAt(calleeStr, lastPointIndex, ':');
+                    compiledCallExpression.push(compiledCallee);
+                }else{
+                    var lastPointIndex;
+                    compiledCallee.array.findIndex(function(v,idx){
+                        if(typeof(v)==='string' && v==='.'){
+                            lastPointIndex=idx;
+                        }
+                    });
+                    compiledCallExpression.push(compiledCallee.slice(0,lastPointIndex));
+                    compiledCallExpression.push(':');
+                    compiledCallExpression.push(compiledCallee.slice(lastPointIndex+1));
+                }               
                 compiledCallExpression.push("(");
+                //console.log('call compiled:',compiledCallee, JSON.stringify(compiledArguments));
                 compiledCallExpression.push(compiledArguments);
                 compiledCallExpression.push(")");
             }
@@ -1597,8 +1853,8 @@
                 compiledCallExpression.push("(_oldENV");
             }
 
-            if (compiledArguments) {
-                compiledCallExpression.push(",");
+            if (expression.arguments.length>0) {
+                compiledCallExpression.push(",");                
                 compiledCallExpression.push(compiledArguments);
             }
             compiledCallExpression.push(")");
@@ -1606,7 +1862,7 @@
 
         setMeta(expression, meta);
 
-        return compiledCallExpression.join('');
+        return compiledCallExpression;
     }
 
     function compileLogicalExpression(expression, meta) {
@@ -1631,7 +1887,7 @@
     }
 
     function compileLogicalExpressionLeftIdentifierOrLiteral(expression, compiledLeft, compiledRight) {
-        var compiledLogicalExpression = ["("];
+        var compiledLogicalExpression = new CompileResult(["("]);
 
         var leftCondition = compileBooleanExpression(expression.left);
 
@@ -1662,11 +1918,11 @@
 
         compiledLogicalExpression.push(")");
 
-        return compiledLogicalExpression.join('');
+        return compiledLogicalExpression;
     }
 
     function compileGenericLogicalExpression(expression, compiledLeft, compiledRight) {
-        var compiledLogicalExpression = ["("];
+        var compiledLogicalExpression = new CompileResult(["("]);
 
         switch (expression.operator) {
         case "&&":
@@ -1693,43 +1949,77 @@
 
         compiledLogicalExpression.push(")");
 
-        return compiledLogicalExpression.join('');
+        return compiledLogicalExpression;
     }
 
     function getBaseMember(compiledExpression) {
         var startIndex = 0;
-        if (compiledExpression.match(/\]$/)) {
-            startIndex = lastTopLevelBracketedGroupStartIndex(compiledExpression);
+        var compiledExpressionStr=compiledExpression.toString()
+        if (compiledExpressionStr.match(/\]$/)) {
+            if (options.luaLocal){
+                startIndex = lastTopLevelBracketedGroupStartIndex(compiledExpressionStr);
+                return {
+                    base: compiledExpressionStr.slice(0, startIndex),
+                    // @number
+                    member: compiledExpressionStr.slice(startIndex + 1, -1)
+                };
+            }
+            startIndex=lastTopLevelBracketedGroupStartIndex_a(compiledExpression.array);
             return {
-                base: compiledExpression.slice(0, startIndex),
+                base: compiledExpression.slice(0,startIndex),
                 // @number
                 member: compiledExpression.slice(startIndex + 1, -1)
             };
         } else {
-            startIndex = compiledExpression.lastIndexOf('.');
+            if (options.luaLocal){
+                startIndex = compiledExpressionStr.lastIndexOf('.');
+                return {
+                    base: compiledExpressionStr.slice(0, startIndex),
+                    // @string
+                    member: '"' + compiledExpressionStr.slice(
+                        // @number
+                        startIndex + 1
+                    ) + '"'
+                };
+            }            
+            compiledExpression.array.forEach(function(v,idx){
+                if(typeof(v)==='string' && v==='.'){
+                    startIndex=idx;
+                }
+            });
             return {
                 base: compiledExpression.slice(0, startIndex),
                 // @string
-                member: '"' + compiledExpression.slice(
+                member: compiledExpression.slice(
                     // @number
                     startIndex + 1
-                ) + '"'
+                ).quote('"')
             };
         }
     }
 
     function getGetterSetterExpression(compiledExpression) {
         var split = getBaseMember(compiledExpression);
+        //console.log('split:', JSON.stringify(split,null,2));
+        var suffix=' .. '
+        if (options.luaLocal){
+            return {
+                // @string
+                getter: split.base+'["_g"'+suffix+split.member+']',
+                // @string
+                setter: split.base+'["_s"'+suffix+split.member+']'
+            };
+        }
         return {
             // @string
-            getter: split.base + '["_g" .. ' + split.member + ']',
+            getter: new CompileResult().push(split.base).push('["_g"'+suffix).push(split.member).push(']'),
             // @string
-            setter: split.base + '["_s" .. ' + split.member + ']'
+            setter: new CompileResult().push(split.base).push('["_s"'+suffix).push(split.member).push(']')
         };
     }
 
     function compileUnaryExpression(expression, meta) {
-        var compiledUnaryExpression = [];
+        var compiledUnaryExpression = new CompileResult();
         var metaArgument = {};
         var compiledExpression = compileExpression(expression.argument, metaArgument);
 
@@ -1801,8 +2091,7 @@
                 // Delete getter/setter
                 if (expression.argument.type === "MemberExpression") {
                     scope = "";
-                    var gs = getGetterSetterExpression(compiledExpression);
-
+                    var gs = getGetterSetterExpression(compiledExpression);                    
                     compiledUnaryExpression.push("local _g, _s = ");
                     compiledUnaryExpression.push(gs.getter);
                     compiledUnaryExpression.push(", ");
@@ -1817,10 +2106,28 @@
                 // Delete value
                 compiledUnaryExpression.push("local _v = ");
                 // @string
-                compiledUnaryExpression.push(scope + compiledExpression);
+                //always delete global var in ENV
+                //console.log('delete compiledExpression:',compiledExpression);
+                var ename;
+                if (isCompileResultLike(compiledExpression)){
+                    ename=compiledExpression.toString();                             
+                }else if (typeof(compiledExpression)==='string'){
+                    ename=compiledExpression;
+                }else {
+                    ename=compiledExpression.name;
+                }
+                if (!ename){
+                    console.error('delete name = null')
+                }else{
+                    if (scope.length>0){
+                        ename=ename.replace(/^_local\d+\./,'');
+                    }                    
+                }
+                
+                compiledUnaryExpression.push(scope).push(ename);
                 compiledUnaryExpression.push("; ");
                 // @string
-                compiledUnaryExpression.push(scope + compiledExpression);
+                compiledUnaryExpression.push(scope).push(ename);
                 compiledUnaryExpression.push(" = nil; return _r or _v ~= nil; end)()");
 
                 if (meta) {
@@ -1843,12 +2150,11 @@
             throw new Error("UnaryExpression: postfix ?!");
         }
 
-        return compiledUnaryExpression.join('');
+        return compiledUnaryExpression;
     }
 
     function compileAdditionOperator(left, right, metaLeft, metaRight, meta) {
-        var compiledAdditionOperator = [];
-
+        var compiledAdditionOperator = new CompileResult();
         if (metaLeft.type === "number" && metaRight.type === "number") {
             compiledAdditionOperator.push(left);
             compiledAdditionOperator.push(" + ");
@@ -1907,11 +2213,11 @@
             compiledAdditionOperator.push(")");
         }
 
-        return compiledAdditionOperator.join("");
+        return compiledAdditionOperator;
     }
 
     function compileComparisonOperator(left, right, operator, metaLeft, metaRight, meta) {
-        var compiledComparisonOperator = [];
+        var compiledComparisonOperator = new CompileResult();
 
         // Raw comparison
         if ((metaLeft.type === "string" && metaRight.type === "string") || (metaLeft.type === "number" && metaRight.type === "number")) {
@@ -1944,11 +2250,11 @@
             meta.type = "boolean";
         }
 
-        return compiledComparisonOperator.join("");
+        return compiledComparisonOperator;
     }
 
     function compileBinaryExpression(expression, meta) {
-        var compiledBinaryExpression = ["("];
+        var compiledBinaryExpression = new CompileResult(["("]);
         var metaLeft = {},
             metaRight = {};
         var left = compileExpression(expression.left, metaLeft),
@@ -2121,7 +2427,7 @@
 
         compiledBinaryExpression.push(")");
 
-        return compiledBinaryExpression.join('');
+        return compiledBinaryExpression;
     }
 
     function pushSimpleBinaryExpression(compiledBinaryExpression, operator, left, right) {
@@ -2133,7 +2439,7 @@
     // TernaryOperator: boxing/unboxing solution
     // http://lua-users.org/wiki/TernaryOperator
     function compileConditionalExpression(expression, meta) {
-        var compiledConditionalExpression = ["(function() if "];
+        var compiledConditionalExpression = new CompileResult(["(function() if "]);
         var metaConsequent = {},
             metaAlternate = {};
         // (function() if boolean(a) then return b else return c end end)()
@@ -2150,21 +2456,21 @@
             }
         }
 
-        return compiledConditionalExpression.join("");
+        return compiledConditionalExpression;
     }
 
     function compileSequenceExpression(expression, meta) {
-        var compiledSequenceExpression = ["_seq({"];
+        var compiledSequenceExpression = new CompileResult(["_seq({"]);
 
         var i, expressions = expression.expressions;
-        var sequence = [];
+        var sequence = new CompileResult([],',');
         var metaLast = {};
         // @number
         for (i = 0; i < expressions.length; ++i) {
             sequence.push(compileExpression(expressions[i], metaLast));
         }
 
-        compiledSequenceExpression.push(sequence.join(","));
+        compiledSequenceExpression.push(sequence);
         compiledSequenceExpression.push("})");
 
         // Type returned by sequence is the same as the type of the last expression in the sequence
@@ -2172,21 +2478,21 @@
             meta.type = metaLast.type;
         }
 
-        return compiledSequenceExpression.join("");
+        return compiledSequenceExpression;
     }
 
     function compileObjectExpression(expression, meta) {
-        var compiledObjectExpression = ["_obj({"];
+        var compiledObjectExpression = new CompileResult(["_obj({"]);
 
         var i, length = expression.properties.length;
         var property;
-        var compiledProperty = [],
-            compiledProperties = [];
+        var compiledProperty,
+            compiledProperties = new CompileResult([],",\n");
         var compiledKey = "";
 
         // @number
         for (i = 0; i < length; ++i) {
-            compiledProperty = ["["];
+            compiledProperty =  new CompileResult(["["]);
             property = expression.properties[i];
 
             if (property.key.type === "Literal") {
@@ -2201,8 +2507,7 @@
             } else {
                 // @string
                 throw new Error("Unexpected property key type: " + property.key.type);
-            }
-
+            }           
             if (property.kind === "get") {
                 // TODO: related to weak typing
                 if (typeof (property.key.value) === "number") {
@@ -2218,18 +2523,17 @@
                 }
                 compiledKey = compiledKey.replace(/^"/, '"_s');
             }
-
+            
             compiledProperty.push(compiledKey);
             compiledProperty.push("] = ");
-            compiledProperty.push(compileExpression(property.value));
-
-            compiledProperties.push(compiledProperty.join(""));
+            compiledProperty.push(compileExpression(property.value));            
+            compiledProperties.push(compiledProperty);
         }
-
+        
         // @number
         if (length > 0) {
             compiledObjectExpression.push("\n");
-            compiledObjectExpression.push(compiledProperties.join(",\n"));
+            compiledObjectExpression.push(compiledProperties);            
             compiledObjectExpression.push("\n");
         }
         compiledObjectExpression.push("})");
@@ -2238,11 +2542,11 @@
             meta.type = "object";
         }
 
-        return compiledObjectExpression.join("");
+        return compiledObjectExpression;
     }
 
     function compileMemberExpression(expression, meta) {
-        var compiledMemberExpression = [];
+        var compiledMemberExpression = new CompileResult([]);
         var compiledObject = compileExpression(expression.object,{});
 
         if (expression.object.type === "Literal") {
@@ -2259,35 +2563,35 @@
         } else {
             var compiledProperty = compileIdentifier(expression.property);
 
-            if (compiledProperty !== expression.property.name) {
+            if (sanitizeIdentifier(expression.property.name) !== expression.property.name) {
                 compiledMemberExpression.push("[\"");
                 compiledMemberExpression.push(sanitizeLiteralString(expression.property.name));
                 compiledMemberExpression.push("\"]");
             } else {
                 compiledMemberExpression.push(".");
-                compiledMemberExpression.push(compiledProperty);
+                compiledMemberExpression.push(expression.property.name);
             }
         }
 
         setMeta(expression, meta);
 
-        return compiledMemberExpression.join("");
+        return compiledMemberExpression;
     }
 
     function compileNewExpression(expression) {
-        var compiledNewExpression = ["_new("];
+        var compiledNewExpression = new CompileResult(["_new("]);
 
-        var newArguments = [compileExpression(expression.callee)];
+        var newArguments =new CompileResult([compileExpression(expression.callee)],',') ;
         var i, length = expression.arguments.length;
         // @number
         for (i = 0; i < length; ++i) {
             newArguments.push(compileExpression(expression.arguments[i]));
         }
 
-        compiledNewExpression.push(newArguments.join(","));
+        compiledNewExpression.push(newArguments);
         compiledNewExpression.push(")");
 
-        return compiledNewExpression.join("");
+        return compiledNewExpression;
     }
 
     function compileThisExpression() {
@@ -2295,9 +2599,9 @@
     }
 
     function compileArrayExpression(expression, meta) {
-        var compiledArrayExpression = ["_arr({"];
+        var compiledArrayExpression = new CompileResult(["_arr({"]);
 
-        var compiledElements = [];
+        var compiledElements = new CompileResult([],',');
         var i, length = expression.elements.length;
 
         // @number
@@ -2313,7 +2617,7 @@
                 compiledElements.push("nil");
             }
         }
-        compiledArrayExpression.push(compiledElements.join(","));
+        compiledArrayExpression.push(compiledElements);
         compiledArrayExpression.push("},");
         compiledArrayExpression.push(length);
         compiledArrayExpression.push(")");
@@ -2322,7 +2626,7 @@
             meta.type = "object";
         }
 
-        return compiledArrayExpression.join("");
+        return compiledArrayExpression;
     }
 
     /*******************
@@ -2332,18 +2636,19 @@
      * ******************/
 
     function compileFunctionDeclaration(declaration) {
-        var compiledFunctionDeclaration = [];
-        var compiledId = compileIdentifier(declaration.id,true);
+        var compiledFunctionDeclaration = new CompileResult();
+        var compiledId = compileIdentifier(declaration.id,'global');
+        //console.log('function decelare:',compiledId)
         //localVarManager.pushLocal(compiledId);
         compiledFunctionDeclaration.push(compiledId); //lovar: replace compiledId with stack_var.id
         compiledFunctionDeclaration.push(" =(");
         compiledFunctionDeclaration.push(compileFunction(declaration));
         compiledFunctionDeclaration.push(");");
-        localVarManager.pushFunction(compiledFunctionDeclaration.join(""));
+        localVarManager.pushFunction(compiledFunctionDeclaration);
     }
 
     function compileVariableDeclaration(variableDeclaration) {
-        var compiledDeclarations = [];
+        var compiledDeclarations = new CompileResult([],'\n');
 
         switch (variableDeclaration.kind) {
             // TODO:
@@ -2362,11 +2667,11 @@
 
                 // Add to current local context
                 //if (!declarator.init){
-                localVarManager.pushLocal(pattern);
+                localVarManager.pushLocal(pattern);                
                 //}
                 if (declarator.init !== null) {
                     expression = compileExpression(declarator.init);
-                    compiledDeclarationInit = [];
+                    compiledDeclarationInit = new CompileResult();
                     compiledDeclarationInit.push(pattern);
                     compiledDeclarationInit.push(" = ");
                     compiledDeclarationInit.push(expression);
@@ -2381,7 +2686,7 @@
             throw new Error("let instruction is not supported yet");
         }
 
-        return compiledDeclarations.join("\n");
+        return compiledDeclarations;
     }
 
     /********************
@@ -2410,11 +2715,20 @@
 
     function compileFunction(fun,meta) {
 	    var hasName=meta && fun.id && fun.id.name.length>0 
-        var compiledFunction =[hasName?'(function() local '+fun.id.name+';'+fun.id.name+'=_wrap_fun(function(':"_wrap_fun(function("];
+        var compiledFunction =new CompileResult([hasName?'(function() local '+fun.id.name+';'+fun.id.name+'=(function(':"(function("]);
         var compiledBody = "";
 
         // New context
         localVarManager.createLocalContext();
+        var i;
+        var params = fun.params;
+        var compiledParams = new CompileResult(["this"],',');
+        // @number
+        for (i = 0; i < params.length; ++i) {
+            var pa=compilePattern(params[i],'param');
+            localVarManager.pushParam(pa);
+            compiledParams.push(pa);
+        }
 
         // Compile body of the function
         if (fun.body.type === "BlockStatement") {
@@ -2428,13 +2742,7 @@
         if (fun.defaults && fun.defaults.length > 0) {
             console.log('Warning: default parameters of functions are ignored');
         }
-        var i;
-        var params = fun.params;
-        var compiledParams = ["this"];
-        // @number
-        for (i = 0; i < params.length; ++i) {
-            compiledParams.push(compilePattern(params[i]));
-        }
+        
 
         // Get context information
         var context = localVarManager.popLocalContext();
@@ -2445,19 +2753,19 @@
         if (useArguments) {
             compiledFunction.push("...)\n");
             // @string
-            compiledFunction.push("local " + compiledParams.join(", ") + " = ...;\n");
+            compiledFunction.push("local ").push(compiledParams).push(" = ...;\n");
             compiledFunction.push("local arguments = _args(...);\n");
 
             compiledParams.push("arguments");
-        } else {
-            compiledFunction.push(compiledParams.join(", "));
+        } else {            
+            compiledFunction.push(compiledParams);
             compiledFunction.push(")\n");
         }
 
         // Locals
         // @number
         if (locals.length > 0) {
-            // local that has the same identifier as one of the arguments will not be redefined
+            // local that has the same identifier as one of the arguments will not be redefined            
             var compiledLocalsDeclaration = buildLocalsDeclarationString(locals, compiledParams);
             compiledFunction.push(compiledLocalsDeclaration);
         }
@@ -2466,47 +2774,56 @@
         var functions = context[2];
         // @number
         if (functions.length > 0) {
-            var compiledFunctionsDeclaration = [];
+            var compiledFunctionsDeclaration = new CompileResult([],'\n');
 
             // @number
             for (i = 0; i < functions.length; ++i) {
                 compiledFunctionsDeclaration.push(functions[i]);
             }
-            compiledFunction.push(compiledFunctionsDeclaration.join("\n"));
+            compiledFunction.push(compiledFunctionsDeclaration);
         }
 
         // Append body and close function
         compiledFunction.push(compiledBody);
         compiledFunction.push("\n");
         compiledFunction.push("end)");
-        if (hasName){
+        if (hasName){            
             compiledFunction.push(' return '+fun.id.name+';end)()');
         }
-        return compiledFunction.join('');
+       // console.log('function ',JSON.stringify(compiledFunction,null,2));
+        return compiledFunction;
     }
 
     function buildLocalsDeclarationString(locals, ignore) {
         ignore = ignore || [];
-        var namesSequence = [];
+        var namesSequence = new CompileResult([],',');
 
-        var i, local, length = locals.length;
-        // @number
+        var i, local,localname, length = locals.length;
+        
         for (i = 0; i < length; ++i) {
-            local = locals.pop();
-            if (ignore.indexOf(local) === -1 && namesSequence.indexOf(local) === -1) {
+            local = locals.pop();            
+            if (typeof(local)==='string'){
+                localname=local
+            }else{
+                localname=local.name 
+            }
+            if (!options.luaLocal || (ignore.indexOf(localname) === -1 && namesSequence.indexOf(localname) === -1)) {
                 namesSequence.push(local);
+                //console.log('push local:',local,ignore.indexOf(localname))
             }
         }
 
         // @number
-        if (namesSequence.length > 0) { //if length>200, it results in lua runtime error
-            var compiledLocalsDeclaration = ["local " ];//+localVarManager.loVarsName()+" = {} "]; 
-            compiledLocalsDeclaration.push(namesSequence.join(","));
-            compiledLocalsDeclaration.push(";\n");
-
-            return compiledLocalsDeclaration.join("");
-	   
+        if (namesSequence.array.length > 0) { //if length>200, it results in lua runtime error
+            if (options.luaLocal){
+                var compiledLocalsDeclaration = new CompileResult(["local " ]);//+localVarManager.loVarsName()+" = {} "]; 
+                compiledLocalsDeclaration.push(namesSequence);
+                compiledLocalsDeclaration.push(";\n");
+                return compiledLocalsDeclaration;
+            }          
+            return "local "+localVarManager.loVarsName()+" = {};\n";                       
         }
+        
         return "";
     }
 
@@ -2540,25 +2857,35 @@
         }
 
         setMeta(identifier, meta);
-        console.log('identifier:',identifier.name,meta)
-        return sanitizeIdentifier(iname)
-
-        /*
-        let siname=
+        //console.log('identifier:',identifier.name,meta)
+        
+        let siname=sanitizeIdentifier(iname);
+        
+        if (options.luaLocal){
+            return siname;
+        }
+                
         if (identifier.name === "arguments") {
             return siname;
         }
+        
+        if (meta==='param' || meta==='label'||meta==='global'){
+            return siname;
+        }
+
         if (meta===true){
             //lhs            
             return localVarManager.loVarName(siname);
         }
-        if (meta){
-            return siname;
-        }
-        
+                       
         let ret=localVarManager.findLoVar(siname);
-        console.log('looking for '+siname+' => '+ret);
-        return ret;*/
+        
+        if (ret) {
+            //console.log(siname+' - resolved as ',ret)
+            return ret;        
+        }
+        //console.log('unable to find '+siname+' - register unresolved')
+        return localVarManager.registerUnresolvedVar(siname) //to be resolve!
     }
 
     // http://en.wikipedia.org/wiki/UTF-8#Description
@@ -2630,7 +2957,7 @@
 
         if (literal.value instanceof RegExp) {
             var regexp = literal.value;
-            var compiledRegExp = ["_regexp(\""];
+            var compiledRegExp = new CompileResult(["_regexp(\""]);
 
             var source = sanitizeRegExpSource(regexp.source);
             compiledRegExp.push(source);
@@ -2675,7 +3002,6 @@
             if (meta) {
                 meta.type = "boolean";
             }
-
             break;
         }
 
