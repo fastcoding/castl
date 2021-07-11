@@ -20,8 +20,19 @@ local band, bor, bnot, bxor, lshift, rshift
 if luajit then
     band, bor, bnot, bxor, lshift, rshift = bit.band, bit.bor, bit.bnot, bit.bxor, bit.lshift, bit.rshift
 else
-    -- else use bit32 lib of Lua 5.2
-    band, bor, bnot, bxor, lshift, rshift = bit32.band, bit32.bor, bit32.bnot, bit32.bxor, bit32.lshift, bit32.rshift
+    -- else use bit32 lib of Lua 5.2    
+    local minver=tonumber(string.match(_VERSION,'%d%.(%d)'))
+    if minver>=2 and minver<4 then 
+       band, bor, bnot, bxor, lshift, rshift = bit32.band, bit32.bor, bit32.bnot, bit32.bxor, bit32.lshift, bit32.rshift
+    elseif minver==4 then        
+           band=function(x,y) return x&y end
+           bor=function(x,y) return x|y end 
+           bnot=function(x) return ~x end
+           bxor=function(x,y) return x^y end
+           lshift=function(x,y) return x<<y end
+           rshift=function(x,y) return x>>y end
+    end
+
 end
 
 local bit = {}

@@ -123,7 +123,7 @@
         },
 
         quote:function(q){
-            q||='"'
+            if (!q) q='"'
             this.array.unshift(q);
             this.array.push(q);
             return this;
@@ -2859,7 +2859,7 @@
         setMeta(identifier, meta);
         //console.log('identifier:',identifier.name,meta)
         
-        let siname=sanitizeIdentifier(iname);
+        var siname=sanitizeIdentifier(iname);
         
         if (options.luaLocal){
             return siname;
@@ -2878,7 +2878,7 @@
             return localVarManager.loVarName(siname);
         }
                        
-        let ret=localVarManager.findLoVar(siname);
+        var ret=localVarManager.findLoVar(siname);
         
         if (ret) {
             //console.log(siname+' - resolved as ',ret)

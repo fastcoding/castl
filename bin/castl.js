@@ -223,7 +223,7 @@ const { parseOptions } = require('commander');
         if (program.jit) {
             console.log("-- Lua code (LuaJIT):");
         } else {
-            console.log("-- Lua code (Lua 5.2):");
+            console.log("-- Lua code (Lua 5.4):");
         }
         console.log("--------------------------------------------------------------------");
         if (!program.linenumber) {
@@ -267,7 +267,7 @@ const { parseOptions } = require('commander');
             if (program.jit) {
                 exec("luajit -b " + tmpFilename + " " + outputname, execCallback);
             } else { // Lua 5.2 bytecode
-                exec("luac5.2 -o " + outputname + " " + tmpFilename, execCallback);
+                exec("luac5.4 -o " + outputname + " " + tmpFilename, execCallback);
             }
         } else { // Output to text
             fs.writeFileSync(outputname, transpiledCode, "utf8");
@@ -282,9 +282,9 @@ const { parseOptions } = require('commander');
             exec("luajit " + tmpFilename, execCallback);
         } else {
             if (program.verbose) {
-                console.log("-- Execution output (Lua 5.2):");
+                console.log("-- Execution output (Lua 5.4):");
             }
-            exec("lua5.2 " + tmpFilename, execCallback);
+            exec("lua5.4 " + tmpFilename, execCallback);
         }
     }
 
