@@ -2662,7 +2662,9 @@
         var compiledFunctionDeclaration = new CompileResult();
         var compiledId = compileIdentifier(declaration.id);
         //console.log('function decelare:',compiledId)
-        localVarManager.pushLocal(compiledId.name);
+        if (compiledId.name){
+            localVarManager.pushLocal(compiledId.name);
+        }        
         compiledFunctionDeclaration.push(compiledId); //lovar: replace compiledId with stack_var.id
         compiledFunctionDeclaration.push(" =(");
         compiledFunctionDeclaration.push(compileFunction(declaration));

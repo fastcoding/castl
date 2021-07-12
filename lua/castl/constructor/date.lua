@@ -21,7 +21,7 @@ local Date
 local internal = require("castl.internal")
 local dateparser = require("castl.modules.dateparser")
 local dateProto = require("castl.protos").dateProto
-
+local ldate = require'date-j'
 local luajit = jit ~= nil
 local date, time = os.date, os.time
 local pack = table.pack or function(...) return {n = select('#',...),...} end
@@ -33,40 +33,36 @@ _ENV = nil
 Date = function(this, ...)
     -- Date constructor not called within a new
     if not withinNew(this, dateProto) then
-        return date("%a %h %d %Y %H:%M:%S GMT%z (%Z)")
+        return ldate():fmt("%a %h %d %Y %H:%M:%S GMT%z (%Z)")
     end
 
     local args = pack(...)
-    local timestamp = 0
-
+    local timestamp =0    
     if args.n == 0 then
-        timestamp = Date.now()
+        timestamp = ldate():elapsed_ms()
     elseif args.n == 1 then
         local arg = args[1]
         local targ = type(arg)
         if targ == "number" then
             timestamp = arg * 1000
         elseif targ == "string" then
-            timestamp = Date.parse(arg)
+            timestamp = ldate(targ):elapsed_ms()
         end
     else
         -- special behavior for year between 0 and 100
         if args[1] >= 0 and args[1] <100 then
-            args[1] = 1900 + args[1]
-	else 
-	   assert(args[1]>1900,"require years >1900 or <100")
-        end
-	
+            args[1] = 1900 + args[1]       
+        end	
         -- more than 1 arguments
         -- year, month, day, hour, minute, second, millisecond
-        timestamp = time{year=args[1],
+        timestamp = ldate{year=args[1],
             month=args[2] + 1,
             day=args[3] or 1,
             hour=args[4] or 0,
             min = args[5] or 0,
-            sec = args[6] or 0}
+            sec = args[6] or 0}:elapsed_ms()
 
-        timestamp = timestamp * 1000 + (args[7] or 0)
+        timestamp = timestamp + (args[7] or 0)
     end
 
     local o = {}
@@ -121,17 +117,19 @@ end
 
 Date.parse = function(this, str)
     -- TODO: parse RFC2822 only for now
-    return dateparser.parse(str, 'RFC2822') * 1000
+    --return dateparser.parse(str, 'RFC2822') * 1000
+    return ldate(str):elapsed_ms()
 end
 
 Date.UTC = function(this, year, month, day, hrs, min, sec, ms)
-    local timestamp = time{year=year,
+    local timestamp = ldate{year=year,
         month = month + 1,
         day = day or 1,
         hour = hrs or 0,
         min = min or 0,
-        sec = sec or 0}
-
+        sec = sec or 0,
+        msec= ms or 0
+    }:elapsed_ms()
     timestamp = (timestamp + dateProto.getTimezoneOffset()) * 1000 + (ms or 0)
 
     return timestamp
