@@ -46,7 +46,7 @@ Date = function(this, ...)
         if targ == "number" then
             timestamp = arg * 1000
         elseif targ == "string" then
-            timestamp = ldate(targ):elapsed_ms()
+            timestamp = ldate(arg):elapsed_ms()
         end
     else
         -- special behavior for year between 0 and 100
